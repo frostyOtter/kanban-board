@@ -1,5 +1,5 @@
 """
-Core domain: Task, Stage, and all board-specific exceptions.
+Core domain: Task, Stage, AuditEntry, and all board-specific exceptions.
 
 Nothing here imports from the rest of the package — this is the
 innermost layer and has zero side-effects.
@@ -26,6 +26,28 @@ class Stage(str, Enum):
 
 
 # ---------------------------------------------------------------------------
+# AuditEntry
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AuditEntry:
+    """A single immutable record of a stage transition."""
+
+    from_stage: Stage | None  # None for the initial "created" entry
+    to_stage: Stage
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    note: str | None = None  # optional free-text reason
+
+    def __str__(self) -> str:
+        arrow = f"{self.from_stage.value} → " if self.from_stage else ""
+        note_str = f" ({self.note})" if self.note else ""
+        return f"[{self.timestamp}] {arrow}{self.to_stage.value}{note_str}"
+
+
+# ---------------------------------------------------------------------------
 # Task
 # ---------------------------------------------------------------------------
 
@@ -41,6 +63,7 @@ class Task:
     )
     code_snippet: str | None = None
     depends_on: list[str] = field(default_factory=list)  # list of Task.id
+    history: list[AuditEntry] = field(default_factory=list)  # audit log
 
     def __str__(self) -> str:
         deps = f" deps={self.depends_on}" if self.depends_on else ""

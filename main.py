@@ -46,6 +46,15 @@ async def send_mock_requests():
         response = await client.get(f"{base_url}/board")
         print(f"Board snapshot: {response.status_code} - {response.json()}")
 
+        response = await client.get(f"{base_url}/tasks/{task2_id}")
+        task_data = response.json()
+        print(f"Get Task 2 with audit log: {response.status_code}")
+        print(f"  History ({len(task_data['history'])} entries):")
+        for entry in task_data["history"]:
+            from_s = f"{entry['from_stage']} → " if entry["from_stage"] else ""
+            note = f" ({entry['note']})" if entry.get("note") else ""
+            print(f"    [{entry['timestamp']}] {from_s}{entry['to_stage']}{note}")
+
 
 async def main():
     server = uvicorn.Server(

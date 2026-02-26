@@ -22,6 +22,7 @@ from loguru import logger
 
 from .assistants import AsyncCodingAssistant, async_mock_assistant
 from .domain import (
+    AuditEntry,
     InvalidTransitionError,
     Stage,
     Task,
@@ -87,6 +88,7 @@ class AsyncKanbanBoard:
                 if dep_id not in self._tasks:
                     raise TaskNotFoundError(dep_id)
             task = Task(title=title, description=description, depends_on=deps)
+            self._record(task, from_stage=None, to_stage=Stage.BACKLOG, note="created")
             self._tasks[task.id] = task
             self._save()
 
@@ -115,6 +117,7 @@ class AsyncKanbanBoard:
 
             # Commit stage immediately so concurrent callers see the updated count
             task.stage = Stage.IN_PROGRESS
+            self._record(task, from_stage=Stage.BACKLOG, to_stage=Stage.IN_PROGRESS)
             self._save()
 
         logger.info(
@@ -140,6 +143,7 @@ class AsyncKanbanBoard:
             task = self._get(task_id)
             self._assert_stage(task, Stage.IN_PROGRESS)
             task.stage = Stage.REVIEW
+            self._record(task, from_stage=Stage.IN_PROGRESS, to_stage=Stage.REVIEW)
             self._save()
         logger.info("Task {}  →  review", task_id)
         return task
@@ -149,6 +153,7 @@ class AsyncKanbanBoard:
             task = self._get(task_id)
             self._assert_stage(task, Stage.REVIEW)
             task.stage = Stage.DONE
+            self._record(task, from_stage=Stage.REVIEW, to_stage=Stage.DONE)
             self._save()
         logger.success("Task {}  →  done  ✓", task_id)
         return task
@@ -175,6 +180,18 @@ class AsyncKanbanBoard:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _record(
+        self,
+        task: Task,
+        from_stage: Stage | None,
+        to_stage: Stage,
+        note: str | None = None,
+    ) -> None:
+        """Append an AuditEntry to the task's history. Must be called inside the lock."""
+        entry = AuditEntry(from_stage=from_stage, to_stage=to_stage, note=note)
+        task.history.append(entry)
+        logger.debug("Audit [{}] {} → {}", task.id, from_stage, to_stage)
 
     def _get(self, task_id: str) -> Task:
         if task_id not in self._tasks:
@@ -210,4 +227,13 @@ class AsyncKanbanBoard:
         data = json.loads(path.read_text())
         for tid, raw in data.items():
             raw["stage"] = Stage(raw["stage"])
+            raw["history"] = [
+                AuditEntry(
+                    from_stage=Stage(e["from_stage"]) if e["from_stage"] else None,
+                    to_stage=Stage(e["to_stage"]),
+                    timestamp=e["timestamp"],
+                    note=e.get("note"),
+                )
+                for e in raw.get("history", [])
+            ]
             self._tasks[tid] = Task(**raw)

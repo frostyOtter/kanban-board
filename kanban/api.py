@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from .board import AsyncKanbanBoard
 from .domain import (
+    AuditEntry,
     BoardError,
     InvalidTransitionError,
     Stage,
@@ -73,6 +74,22 @@ class CreateTaskRequest(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
 
 
+class AuditEntryResponse(BaseModel):
+    from_stage: Stage | None
+    to_stage: Stage
+    timestamp: str
+    note: str | None
+
+    @classmethod
+    def from_entry(cls, entry: AuditEntry) -> "AuditEntryResponse":
+        return cls(
+            from_stage=entry.from_stage,
+            to_stage=entry.to_stage,
+            timestamp=entry.timestamp,
+            note=entry.note,
+        )
+
+
 class TaskResponse(BaseModel):
     id: str
     title: str
@@ -81,6 +98,7 @@ class TaskResponse(BaseModel):
     created_at: str
     code_snippet: str | None
     depends_on: list[str]
+    history: list[AuditEntryResponse]
 
     @classmethod
     def from_task(cls, task: Task) -> "TaskResponse":
@@ -92,6 +110,7 @@ class TaskResponse(BaseModel):
             created_at=task.created_at,
             code_snippet=task.code_snippet,
             depends_on=task.depends_on,
+            history=[AuditEntryResponse.from_entry(e) for e in task.history],
         )
 
 
