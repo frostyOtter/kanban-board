@@ -30,6 +30,7 @@ from .domain import (
     UnresolvedDependencyError,
     WIPLimitError,
 )
+from .hooks import AsyncHookFn, HookRegistry
 
 import asyncio
 
@@ -50,12 +51,18 @@ class AsyncKanbanBoard:
         assistant: AsyncCodingAssistant = async_mock_assistant,
         wip_limit: int = 3,
         persist_path: Path | None = DEFAULT_PERSIST_PATH,
+        hooks: dict[str, list[AsyncHookFn]] | None = None,
     ) -> None:
         self._tasks: dict[str, Task] = {}
         self._assistant = assistant
         self._wip_limit = wip_limit
         self._persist_path = persist_path
         self._lock = asyncio.Lock()
+        self._hook_registry = HookRegistry()
+        if hooks:
+            for event, hook_list in hooks.items():
+                for hook in hook_list:
+                    self._hook_registry.register(event, hook)
 
         if persist_path and persist_path.exists():
             self._load(persist_path)
@@ -94,6 +101,7 @@ class AsyncKanbanBoard:
 
         dep_info = f" (depends on {deps})" if deps else ""
         logger.info("Created  {} — {!r}{}", task.id, title, dep_info)
+        await self._fire_hook("on_transition", task)
         return task
 
     async def move_to_in_progress(self, task_id: str) -> Task:
@@ -136,6 +144,7 @@ class AsyncKanbanBoard:
             self._save()
 
         logger.success("Coding assistant done for task {}", task_id)
+        await self._fire_hook("on_transition", task)
         return task
 
     async def move_to_review(self, task_id: str) -> Task:
@@ -146,6 +155,7 @@ class AsyncKanbanBoard:
             self._record(task, from_stage=Stage.IN_PROGRESS, to_stage=Stage.REVIEW)
             self._save()
         logger.info("Task {}  →  review", task_id)
+        await self._fire_hook("on_transition", task)
         return task
 
     async def approve(self, task_id: str) -> Task:
@@ -156,6 +166,8 @@ class AsyncKanbanBoard:
             self._record(task, from_stage=Stage.REVIEW, to_stage=Stage.DONE)
             self._save()
         logger.success("Task {}  →  done  ✓", task_id)
+        await self._fire_hook("on_transition", task)
+        await self._fire_hook("on_done", task)
         return task
 
     def get_task(self, task_id: str) -> Task:
@@ -176,6 +188,10 @@ class AsyncKanbanBoard:
             print(f"\n── {stage.value.upper()} ({len(tasks)}/{cap}) ──")
             for t in tasks:
                 print(" ", t)
+
+    async def _fire_hook(self, event: str, task: Task) -> None:
+        """Fire hooks for the given event. Errors are caught and logged."""
+        await self._hook_registry.fire(event, task)
 
     # ------------------------------------------------------------------
     # Internal helpers
