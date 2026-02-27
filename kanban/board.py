@@ -20,7 +20,11 @@ from pathlib import Path
 
 from loguru import logger
 
-from .assistants import AsyncCodingAssistant, async_mock_assistant
+from .assistants import (
+    AsyncCodingAssistant,
+    AsyncReviewerAssistant,
+    async_mock_assistant,
+)
 from .domain import (
     AuditEntry,
     InvalidTransitionError,
@@ -52,6 +56,7 @@ class AsyncKanbanBoard:
         wip_limit: int = 3,
         persist_path: Path | None = DEFAULT_PERSIST_PATH,
         hooks: dict[str, list[AsyncHookFn]] | None = None,
+        reviewer: AsyncReviewerAssistant | None = None,
     ) -> None:
         self._tasks: dict[str, Task] = {}
         self._assistant = assistant
@@ -59,6 +64,7 @@ class AsyncKanbanBoard:
         self._persist_path = persist_path
         self._lock = asyncio.Lock()
         self._hook_registry = HookRegistry()
+        self._reviewer = reviewer
         if hooks:
             for event, hook_list in hooks.items():
                 for hook in hook_list:
@@ -154,8 +160,19 @@ class AsyncKanbanBoard:
             task.stage = Stage.REVIEW
             self._record(task, from_stage=Stage.IN_PROGRESS, to_stage=Stage.REVIEW)
             self._save()
-        logger.info("Task {}  →  review", task_id)
+
         await self._fire_hook("on_transition", task)
+
+        if self._reviewer:
+            logger.info("Reviewer analysing task {}…", task_id)
+            notes = await self._reviewer(task.description, task.code_snippet or "")
+
+            async with self._lock:
+                task.review_notes = notes
+                self._save()
+
+            logger.success("Reviewer done for task {}", task_id)
+
         return task
 
     async def approve(self, task_id: str) -> Task:
@@ -252,4 +269,5 @@ class AsyncKanbanBoard:
                 )
                 for e in raw.get("history", [])
             ]
+            raw["review_notes"] = raw.get("review_notes")
             self._tasks[tid] = Task(**raw)

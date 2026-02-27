@@ -99,6 +99,7 @@ class TaskResponse(BaseModel):
     code_snippet: str | None
     depends_on: list[str]
     history: list[AuditEntryResponse]
+    review_notes: str | None
 
     @classmethod
     def from_task(cls, task: Task) -> "TaskResponse":
@@ -111,6 +112,7 @@ class TaskResponse(BaseModel):
             code_snippet=task.code_snippet,
             depends_on=task.depends_on,
             history=[AuditEntryResponse.from_entry(e) for e in task.history],
+            review_notes=task.review_notes,
         )
 
 

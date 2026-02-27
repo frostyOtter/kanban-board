@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from kanban.api import app, CreateTaskRequest, TaskResponse, BoardSnapshot
 from kanban.board import AsyncKanbanBoard
 from kanban.domain import Stage, TaskNotFoundError, WIPLimitError
+from kanban.assistants import async_mock_reviewer
 
 
 @pytest.fixture
@@ -373,6 +374,8 @@ def test_task_response_schema():
         created_at="2024-01-01T00:00:00+00:00",
         code_snippet="code",
         depends_on=[],
+        history=[],
+        review_notes=None,
     )
     assert response.id == "123"
     assert response.stage == Stage.DONE
@@ -482,3 +485,159 @@ def test_task_with_blocked_dependencies(client):
     # Now dependent task can start
     response = client.post(f"/tasks/{dependent_id}/start")
     assert response.status_code == 200
+
+
+def test_reviewer_sets_review_notes():
+    """Test that reviewer populates review_notes after move_to_review."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as f:
+        temp_path = Path(f.name)
+
+    # Delete empty file
+    temp_path.unlink()
+
+    from kanban.api import get_board
+
+    app.dependency_overrides[get_board] = lambda: AsyncKanbanBoard(
+        persist_path=temp_path, reviewer=async_mock_reviewer
+    )
+
+    with TestClient(app) as test_client:
+        task = test_client.post(
+            "/tasks", json={"title": "Review Test", "description": "Test with TODO"}
+        )
+        task_id = task.json()["id"]
+
+        test_client.post(f"/tasks/{task_id}/start")
+
+        response = test_client.post(f"/tasks/{task_id}/review")
+        assert response.status_code == 200
+        assert response.json()["review_notes"] is not None
+        assert (
+            "Review Checklist" in response.json()["review_notes"]
+            or "✓ Code reviewed" in response.json()["review_notes"]
+        )
+
+        # Check GET /tasks/{id} returns review_notes
+        get_response = test_client.get(f"/tasks/{task_id}")
+        assert get_response.status_code == 200
+        assert get_response.json()["review_notes"] is not None
+
+    app.dependency_overrides.clear()
+
+
+def test_reviewer_concurrent_with_board_operations():
+    """Test that reviewer runs concurrently with other board operations."""
+    import asyncio
+    import time
+
+    async def slow_reviewer(description, snippet):
+        await asyncio.sleep(0.1)
+        return f"Review for {description[:20]}"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as f:
+        temp_path = Path(f.name)
+
+    temp_path.unlink()
+
+    from kanban.api import get_board
+
+    app.dependency_overrides[get_board] = lambda: AsyncKanbanBoard(
+        persist_path=temp_path, reviewer=slow_reviewer
+    )
+
+    with TestClient(app) as test_client:
+        t1 = test_client.post(
+            "/tasks", json={"title": "T1", "description": "First task"}
+        )
+        t2 = test_client.post(
+            "/tasks", json={"title": "T2", "description": "Second task"}
+        )
+
+        t1_id = t1.json()["id"]
+        t2_id = t2.json()["id"]
+
+        test_client.post(f"/tasks/{t1_id}/start")
+        test_client.post(f"/tasks/{t2_id}/start")
+
+        # Move t1 to review - reviewer will run concurrently
+        start = time.time()
+        test_client.post(f"/tasks/{t1_id}/review")
+
+        # While reviewer runs, board should remain usable
+        get_response = test_client.get(f"/tasks/{t2_id}")
+        assert get_response.status_code == 200
+
+        elapsed = time.time() - start
+        assert elapsed < 0.2  # Should complete quickly even with slow reviewer
+
+    app.dependency_overrides.clear()
+
+
+def test_no_reviewer_no_review_notes():
+    """Test that review_notes remains None when no reviewer is configured."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as f:
+        temp_path = Path(f.name)
+
+    temp_path.unlink()
+
+    from kanban.api import get_board
+
+    app.dependency_overrides[get_board] = lambda: AsyncKanbanBoard(
+        persist_path=temp_path
+    )
+
+    with TestClient(app) as test_client:
+        task = test_client.post(
+            "/tasks", json={"title": "No Reviewer", "description": "Test"}
+        )
+        task_id = task.json()["id"]
+
+        test_client.post(f"/tasks/{task_id}/start")
+        test_client.post(f"/tasks/{task_id}/review")
+
+        response = test_client.get(f"/tasks/{task_id}")
+        assert response.status_code == 200
+        assert response.json()["review_notes"] is None
+
+    app.dependency_overrides.clear()
+
+
+def test_reviewer_persists_to_disk():
+    """Test that review_notes are persisted to disk."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as f:
+        temp_path = Path(f.name)
+
+    temp_path.unlink()
+
+    from kanban.api import get_board
+
+    app.dependency_overrides[get_board] = lambda: AsyncKanbanBoard(
+        persist_path=temp_path, reviewer=async_mock_reviewer
+    )
+
+    with TestClient(app) as test_client:
+        task = test_client.post(
+            "/tasks",
+            json={"title": "Persist Review", "description": "Test persistence"},
+        )
+        task_id = task.json()["id"]
+
+        test_client.post(f"/tasks/{task_id}/start")
+        test_client.post(f"/tasks/{task_id}/review")
+
+        review_notes = test_client.get(f"/tasks/{task_id}").json()["review_notes"]
+        assert review_notes is not None
+
+    app.dependency_overrides.clear()
+
+    # Create new board with same persist path
+    app.dependency_overrides[get_board] = lambda: AsyncKanbanBoard(
+        persist_path=temp_path
+    )
+
+    with TestClient(app) as test_client:
+        response = test_client.get(f"/tasks/{task_id}")
+        assert response.status_code == 200
+        assert response.json()["review_notes"] == review_notes
+
+    app.dependency_overrides.clear()

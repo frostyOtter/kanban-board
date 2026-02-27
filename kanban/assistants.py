@@ -19,6 +19,8 @@ from loguru import logger
 # Type alias used by the board
 AsyncCodingAssistant = Callable[[str], Coroutine[Any, Any, str]]
 
+AsyncReviewerAssistant = Callable[[str, str], Coroutine[Any, Any, str]]
+
 
 async def async_mock_assistant(description: str) -> str:
     """Simulates network latency — no real API call."""
@@ -60,3 +62,19 @@ async def async_claude_assistant(description: str) -> str:
         ],
     )
     return message.content[0].text
+
+
+async def async_mock_reviewer(description: str, snippet: str) -> str:
+    """Simulates a reviewer that checks the generated code."""
+    logger.debug("Mock reviewer: analysing {!r}…", description[:50])
+    await asyncio.sleep(0.05)
+    issues = []
+    if "TODO" in snippet:
+        issues.append("- Contains TODO markers")
+    if "pass" in snippet:
+        issues.append("- Uses bare pass statements")
+
+    if issues:
+        return "Review Checklist:\n" + "\n".join(issues)
+    else:
+        return f"✓ Code reviewed for: {description[:50]}...\nIssues: None"

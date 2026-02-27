@@ -64,6 +64,7 @@ class Task:
     code_snippet: str | None = None
     depends_on: list[str] = field(default_factory=list)  # list of Task.id
     history: list[AuditEntry] = field(default_factory=list)  # audit log
+    review_notes: str | None = None
 
     def __str__(self) -> str:
         deps = f" deps={self.depends_on}" if self.depends_on else ""
