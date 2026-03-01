@@ -376,6 +376,7 @@ def test_task_response_schema():
         depends_on=[],
         history=[],
         review_notes=None,
+        retry_count=0,
     )
     assert response.id == "123"
     assert response.stage == Stage.DONE
@@ -641,3 +642,161 @@ def test_reviewer_persists_to_disk():
         assert response.json()["review_notes"] == review_notes
 
     app.dependency_overrides.clear()
+
+
+def test_reject_task(client):
+    """Test POST /tasks/{id}/reject endpoint."""
+    task_response = client.post(
+        "/tasks", json={"title": "Reject Test", "description": "Test rejection"}
+    )
+    task_id = task_response.json()["id"]
+
+    client.post(f"/tasks/{task_id}/start")
+    client.post(f"/tasks/{task_id}/review")
+
+    reject_response = client.post(
+        f"/tasks/{task_id}/reject", json={"reason": "Need more work"}
+    )
+
+    assert reject_response.status_code == 200
+    data = reject_response.json()
+    assert data["stage"] == "backlog"
+    assert data["retry_count"] == 1
+
+    task = client.get(f"/tasks/{task_id}").json()
+    assert task["retry_count"] == 1
+
+
+def test_reject_task_invalid_stage(client):
+    """Test rejecting a task not in review stage raises error."""
+    task_response = client.post(
+        "/tasks", json={"title": "Invalid Stage", "description": "Test invalid stage"}
+    )
+    task_id = task_response.json()["id"]
+
+    reject_response = client.post(
+        f"/tasks/{task_id}/reject", json={"reason": "Can't reject"}
+    )
+
+    assert reject_response.status_code == 422
+    assert "expected 'review'" in reject_response.json()["detail"]
+
+
+def test_reject_task_multiple_times(client):
+    """Test that retry_count increments correctly across multiple rejections."""
+    task_response = client.post(
+        "/tasks",
+        json={"title": "Multiple Rejects", "description": "Test multiple rejects"},
+    )
+    task_id = task_response.json()["id"]
+
+    for i in range(3):
+        client.post(f"/tasks/{task_id}/start")
+        client.post(f"/tasks/{task_id}/review")
+        client.post(
+            f"/tasks/{task_id}/reject", json={"reason": f"Reject attempt {i + 1}"}
+        )
+        task = client.get(f"/tasks/{task_id}").json()
+        assert task["retry_count"] == i + 1
+
+
+def test_reject_frees_wip_slot(client_wip_1):
+    """Test that rejecting a task frees up the WIP slot."""
+    t1 = client_wip_1.post(
+        "/tasks", json={"title": "Task 1", "description": "First"}
+    ).json()
+    t2 = client_wip_1.post(
+        "/tasks", json={"title": "Task 2", "description": "Second"}
+    ).json()
+
+    client_wip_1.post(f"/tasks/{t1['id']}/start")
+
+    # Task 2 should be blocked by WIP limit
+    start_response = client_wip_1.post(f"/tasks/{t2['id']}/start")
+    assert start_response.status_code == 429
+
+    # Reject task 1
+    client_wip_1.post(f"/tasks/{t1['id']}/review")
+    client_wip_1.post(f"/tasks/{t1['id']}/reject", json={"reason": "Try again"})
+
+    # Now task 2 can start
+    start_response = client_wip_1.post(f"/tasks/{t2['id']}/start")
+    assert start_response.status_code == 200
+
+
+def test_reject_records_audit_entry(client):
+    """Test that rejection records an audit entry with the reason."""
+    task_response = client.post(
+        "/tasks", json={"title": "Audit Test", "description": "Test audit entry"}
+    )
+    task_id = task_response.json()["id"]
+
+    client.post(f"/tasks/{task_id}/start")
+    client.post(f"/tasks/{task_id}/review")
+
+    reason = "Code needs refactoring"
+    client.post(f"/tasks/{task_id}/reject", json={"reason": reason})
+
+    task = client.get(f"/tasks/{task_id}").json()
+    history = task["history"]
+
+    reject_entry = next(
+        (
+            h
+            for h in history
+            if h["from_stage"] == "review" and h["to_stage"] == "backlog"
+        ),
+        None,
+    )
+    assert reject_entry is not None
+    assert reject_entry["note"] == reason
+
+
+def test_reject_reason_validation(client):
+    """Test that reject endpoint validates reason field."""
+    task_response = client.post(
+        "/tasks", json={"title": "Validation Test", "description": "Test validation"}
+    )
+    task_id = task_response.json()["id"]
+
+    client.post(f"/tasks/{task_id}/start")
+    client.post(f"/tasks/{task_id}/review")
+
+    # Empty reason should fail
+    reject_response = client.post(f"/tasks/{task_id}/reject", json={"reason": ""})
+    assert reject_response.status_code == 422
+
+    # Too long reason should fail
+    reject_response = client.post(
+        f"/tasks/{task_id}/reject", json={"reason": "x" * 501}
+    )
+    assert reject_response.status_code == 422
+
+
+def test_reject_task_not_found(client):
+    """Test rejecting a non-existent task returns 404."""
+    reject_response = client.post(
+        "/tasks/nonexistent/reject", json={"reason": "Does not exist"}
+    )
+    assert reject_response.status_code == 404
+
+
+def test_board_view_shows_rejected_tasks_in_backlog(client):
+    """Test that rejected tasks appear correctly in board view."""
+    task_response = client.post(
+        "/tasks", json={"title": "Board View Test", "description": "Test board view"}
+    )
+    task_id = task_response.json()["id"]
+
+    client.post(f"/tasks/{task_id}/start")
+    client.post(f"/tasks/{task_id}/review")
+    client.post(f"/tasks/{task_id}/reject", json={"reason": "Retry"})
+
+    board_response = client.get("/board")
+    assert board_response.status_code == 200
+    board = board_response.json()
+
+    backlog_tasks = board["backlog"]
+    assert len(backlog_tasks) == 1
+    assert backlog_tasks[0]["id"] == task_id
+    assert backlog_tasks[0]["retry_count"] == 1

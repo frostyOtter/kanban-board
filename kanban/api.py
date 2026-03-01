@@ -17,6 +17,7 @@ Endpoints:
   POST   /tasks/{id}/start            Backlog → In-Progress
   POST   /tasks/{id}/review           In-Progress → Review
   POST   /tasks/{id}/approve          Review → Done
+  POST   /tasks/{id}/reject          Review → Backlog (with reason)
   GET    /board                       Board snapshot (all stages)
 """
 
@@ -69,12 +70,42 @@ BoardDep = Annotated[AsyncKanbanBoard, Depends(get_board)]
 
 
 class CreateTaskRequest(BaseModel):
+    """
+    Request body for creating a new task.
+
+    Attributes:
+        title: Task title (1-120 characters).
+        description: Detailed task description.
+        depends_on: List of task IDs that must be DONE before this task can start.
+    """
+
     title: str = Field(..., min_length=1, max_length=120)
     description: str = Field(..., min_length=1)
     depends_on: list[str] = Field(default_factory=list)
 
 
+class RejectRequest(BaseModel):
+    """
+    Request body for task rejection.
+
+    Attributes:
+        reason: Free-text reason for rejection (1-500 characters).
+    """
+
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
 class AuditEntryResponse(BaseModel):
+    """
+    Response model for a single audit entry.
+
+    Attributes:
+        from_stage: Stage the task transitioned from (None for initial creation).
+        to_stage: Stage the task transitioned to.
+        timestamp: ISO timestamp of the transition.
+        note: Optional free-text note (e.g., rejection reason).
+    """
+
     from_stage: Stage | None
     to_stage: Stage
     timestamp: str
@@ -91,6 +122,22 @@ class AuditEntryResponse(BaseModel):
 
 
 class TaskResponse(BaseModel):
+    """
+    Response model for a task.
+
+    Attributes:
+        id: Unique task identifier.
+        title: Task title.
+        description: Task description.
+        stage: Current stage.
+        created_at: ISO timestamp when task was created.
+        code_snippet: Generated code snippet (if any).
+        depends_on: List of task IDs this task depends on.
+        history: Audit log of all stage transitions.
+        review_notes: Reviewer feedback (if any).
+        retry_count: Number of times task has been rejected.
+    """
+
     id: str
     title: str
     description: str
@@ -100,6 +147,7 @@ class TaskResponse(BaseModel):
     depends_on: list[str]
     history: list[AuditEntryResponse]
     review_notes: str | None
+    retry_count: int
 
     @classmethod
     def from_task(cls, task: Task) -> "TaskResponse":
@@ -113,10 +161,21 @@ class TaskResponse(BaseModel):
             depends_on=task.depends_on,
             history=[AuditEntryResponse.from_entry(e) for e in task.history],
             review_notes=task.review_notes,
+            retry_count=task.retry_count,
         )
 
 
 class BoardSnapshot(BaseModel):
+    """
+    Response model for board view grouped by stage.
+
+    Attributes:
+        backlog: List of tasks in BACKLOG stage.
+        in_progress: List of tasks in IN_PROGRESS stage.
+        review: List of tasks in REVIEW stage.
+        done: List of tasks in DONE stage.
+    """
+
     backlog: list[TaskResponse]
     in_progress: list[TaskResponse]
     review: list[TaskResponse]
@@ -209,6 +268,32 @@ async def review_task(task_id: str, board: BoardDep) -> TaskResponse:
 async def approve_task(task_id: str, board: BoardDep) -> TaskResponse:
     try:
         task = await board.approve(task_id)
+    except BoardError as exc:
+        raise _http(exc)
+    return TaskResponse.from_task(task)
+
+
+@app.post("/tasks/{task_id}/reject", response_model=TaskResponse)
+async def reject_task(
+    task_id: str, body: RejectRequest, board: BoardDep
+) -> TaskResponse:
+    """
+    Reject a task, returning it from REVIEW to BACKLOG.
+
+    Args:
+        task_id: ID of task to reject.
+        body: Rejection reason (1-500 characters).
+
+    Returns:
+        Updated task with stage=BACKLOG and incremented retry_count.
+
+    Raises:
+        404: Task not found.
+        422: Task not in REVIEW stage.
+        422: Invalid reason (empty or too long).
+    """
+    try:
+        task = await board.reject(task_id, body.reason)
     except BoardError as exc:
         raise _http(exc)
     return TaskResponse.from_task(task)

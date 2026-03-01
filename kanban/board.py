@@ -3,7 +3,8 @@ AsyncKanbanBoard — core board logic.
 
 Responsibilities:
   - CRUD for tasks
-  - Stage transition enforcement
+  - Stage transition enforcement (Backlog → In-Progress → Review → Done)
+  - Reject transition (Review → Backlog) with retry tracking
   - WIP limit (max concurrent In-Progress tasks)
   - Dependency resolution (hard-block on unfinished deps)
   - JSON persistence (sync, fine at this scale)
@@ -187,6 +188,35 @@ class AsyncKanbanBoard:
         await self._fire_hook("on_done", task)
         return task
 
+    async def reject(self, task_id: str, reason: str) -> Task:
+        """
+        Reject a task from REVIEW, returning it to BACKLOG.
+
+        Args:
+            task_id: ID of task to reject.
+            reason: Free-text reason for rejection (stored in audit trail).
+
+        Returns:
+            The updated task with stage=BACKLOG and incremented retry_count.
+
+        Raises:
+            TaskNotFoundError:      Task does not exist.
+            InvalidTransitionError: Task is not in REVIEW stage.
+        """
+        async with self._lock:
+            task = self._get(task_id)
+            self._assert_stage(task, Stage.REVIEW)
+            task.stage = Stage.BACKLOG
+            task.retry_count += 1
+            self._record(
+                task, from_stage=Stage.REVIEW, to_stage=Stage.BACKLOG, note=reason
+            )
+            self._save()
+
+        logger.info("Task {} rejected → backlog (reason: {})", task_id, reason[:50])
+        await self._fire_hook("on_rejected", task)
+        return task
+
     def get_task(self, task_id: str) -> Task:
         """Synchronous read — safe to call from routes without await."""
         return self._get(task_id)
@@ -270,4 +300,5 @@ class AsyncKanbanBoard:
                 for e in raw.get("history", [])
             ]
             raw["review_notes"] = raw.get("review_notes")
+            raw["retry_count"] = raw.get("retry_count", 0)
             self._tasks[tid] = Task(**raw)

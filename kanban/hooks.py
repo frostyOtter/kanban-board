@@ -3,6 +3,12 @@ Hooks system — decouple side effects from board logic.
 
 Board fires events; listeners react. Nothing inside board.py knows or cares
 what happens downstream.
+
+Available hook events:
+    on_transition:  Fired on every stage change (including creation).
+    on_done:        Fired specifically when task reaches DONE stage.
+    on_stale_task: Fired when a task is detected as stale.
+    on_rejected:    Fired when a task is rejected from REVIEW to BACKLOG.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ class HookRegistry:
             "on_transition": [],
             "on_done": [],
             "on_stale_task": [],
+            "on_rejected": [],
         }
 
     def register(self, event: str, hook: AsyncHookFn) -> None:
