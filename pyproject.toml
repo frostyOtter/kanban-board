@@ -12,3 +12,118 @@ dependencies = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
 ]
+[dependency-groups]
+dev = [
+    "ruff>=0.11.13",
+]
+
+# --- START Ruff Configuration ---
+[tool.ruff]
+# Same as Black.
+line-length = 88
+indent-width = 4
+
+# Enable fix behavior by-default when running ruff
+fix = true
+
+# Enumerate all fixed violations.
+show-fixes = true
+
+# Exclude directories (e.g., virtual environments, build artifacts)
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+    "baml_client/*",
+    "baml_scr/*",
+    "notebooks/*",
+    "prompt_tuning/*",
+    "fine_tuning/*",
+    "local/*",
+    "orchestration/*",
+]
+
+[tool.ruff.lint]
+select = [
+    # Pyflakes
+    "F",
+    # isort
+    "I",
+    #FastAPI Best Practice
+    "FAST",
+  # --- Newly added rules 2025-08-26 ---
+]
+
+# Ignore specific rules if needed (example: ignore missing docstrings for __init__)
+ignore = [
+  "F841",
+  "F401"
+  # Add more as appropriate for your codebase
+]
+
+exclude = ["*.ipynb"]
+
+# Formatting options
+[tool.ruff.format]
+# Like Black, use double quotes for strings
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs
+indent-style = "space"
+
+# Like Black, respect magic trailing commas
+skip-magic-trailing-comma = false
+
+# Use `\n` line endings for all files
+line-ending = "lf"
+
+# Enable reformatting of code snippets in docstrings
+docstring-code-format = true
+
+exclude = ["*.ipynb"]
+
+# Docstring style: Google
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-annotations]
+# Suppress ANN401 for dynamically typed *args and **kwargs arguments
+allow-star-arg-any = true
+
+# Allow the omission of a return type hint for __init__ if at least one argument is annotated
+mypy-init-return = true
+
+# Suppress ANN000-level violations for arguments matching the "dummy" variable regex (like _)
+suppress-dummy-args = true
+
+# Suppress ANN200-level violations for functions
+suppress-none-returning = true
+
+[tool.ruff.lint.isort]
+# Whether to place import from imports before straight imports when sorting
+from-first = false
+
+# --- END Ruff Configuration ---

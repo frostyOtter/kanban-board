@@ -23,13 +23,15 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
+import os
 from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from .board import AsyncKanbanBoard
+from .board import AsyncKanbanBoard, stale_task_monitor
 from .domain import (
     AuditEntry,
     BoardError,
@@ -53,7 +55,24 @@ _board: AsyncKanbanBoard | None = None
 async def lifespan(app: FastAPI):
     global _board
     _board = AsyncKanbanBoard()
+
+    # Environment config
+    stale_threshold = int(os.getenv("STALE_THRESHOLD_SECONDS", "300"))
+    poll_interval = int(os.getenv("MONITOR_POLL_SECONDS", "60"))
+
+    # Start background monitor
+    monitor_task = asyncio.create_task(
+        stale_task_monitor(_board, stale_threshold, poll_interval)
+    )
+
     yield
+
+    # Clean shutdown
+    monitor_task.cancel()
+    try:
+        await monitor_task
+    except asyncio.CancelledError:
+        pass
 
 
 def get_board() -> AsyncKanbanBoard:

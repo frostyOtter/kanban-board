@@ -15,6 +15,7 @@ are async and protected by a single asyncio.Lock.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import asdict
 from pathlib import Path
@@ -236,6 +237,39 @@ class AsyncKanbanBoard:
             for t in tasks:
                 print(" ", t)
 
+    def find_stale(self, threshold_seconds: int = 300) -> list[Task]:
+        """
+        Find tasks stuck in IN_PROGRESS longer than threshold.
+
+        Args:
+            threshold_seconds: Maximum seconds allowed in IN_PROGRESS (default: 300).
+
+        Returns:
+            List of tasks that have been in IN_PROGRESS longer than threshold.
+        """
+        from datetime import datetime, timezone
+
+        cutoff = datetime.now(timezone.utc).timestamp() - threshold_seconds
+        stale = []
+
+        for task in self._tasks.values():
+            if task.stage != Stage.IN_PROGRESS:
+                continue
+
+            # Find the most recent transition to IN_PROGRESS
+            transition_time = None
+            for entry in reversed(task.history):
+                if entry.to_stage == Stage.IN_PROGRESS:
+                    transition_time = datetime.fromisoformat(
+                        entry.timestamp
+                    ).timestamp()
+                    break
+
+            if transition_time and transition_time < cutoff:
+                stale.append(task)
+
+        return stale
+
     async def _fire_hook(self, event: str, task: Task) -> None:
         """Fire hooks for the given event. Errors are caught and logged."""
         await self._hook_registry.fire(event, task)
@@ -302,3 +336,41 @@ class AsyncKanbanBoard:
             raw["review_notes"] = raw.get("review_notes")
             raw["retry_count"] = raw.get("retry_count", 0)
             self._tasks[tid] = Task(**raw)
+
+
+async def stale_task_monitor(
+    board: "AsyncKanbanBoard",
+    threshold_seconds: int = 300,
+    poll_interval_seconds: int = 60,
+) -> None:
+    """
+    Background task that polls for stale tasks and fires on_stale_task hooks.
+
+    Args:
+        board: The AsyncKanbanBoard instance to monitor.
+        threshold_seconds: Maximum seconds allowed in IN_PROGRESS (default: 300).
+        poll_interval_seconds: How often to poll for stale tasks (default: 60).
+
+    Raises:
+        asyncio.CancelledError: When the monitor is cancelled during shutdown.
+    """
+    logger.info(
+        "Stale task monitor started (threshold: {}s, poll: {}s)",
+        threshold_seconds,
+        poll_interval_seconds,
+    )
+
+    try:
+        while True:
+            await asyncio.sleep(poll_interval_seconds)
+            stale = board.find_stale(threshold_seconds)
+
+            if stale:
+                logger.warning("Found {} stale tasks", len(stale))
+                for task in stale:
+                    await board._fire_hook("on_stale_task", task)
+    except asyncio.CancelledError:
+        logger.info("Stale task monitor shutting down...")
+        raise
+    except Exception as e:
+        logger.error("Stale task monitor crashed: {}", e)

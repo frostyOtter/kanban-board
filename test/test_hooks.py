@@ -294,3 +294,62 @@ async def test_built_in_log_transition_hook():
 
     await board.move_to_in_progress(task.id)
     await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_on_stale_task_hook_registered():
+    """Test that on_stale_task hook is registered in HookRegistry."""
+    registry = HookRegistry()
+    assert "on_stale_task" in registry._hooks
+
+
+@pytest.mark.asyncio
+async def test_on_stale_task_hook_fires():
+    """Test that on_stale_task hook fires correctly."""
+    import asyncio
+    from datetime import datetime, timezone
+    from kanban.board import AsyncKanbanBoard, stale_task_monitor
+    from kanban.domain import AuditEntry, Stage
+
+    hook_calls = []
+
+    async def stale_hook(task):
+        hook_calls.append(task.id)
+
+    hooks = {"on_stale_task": [stale_hook]}
+    board = AsyncKanbanBoard(persist_path=None, hooks=hooks)
+
+    task = await board.create_task("Stale Task", "Will become stale")
+    await board.move_to_in_progress(task.id)
+
+    # Manually set the transition time to be old
+    for entry in reversed(task.history):
+        if entry.to_stage == Stage.IN_PROGRESS:
+            old_time = datetime.now(timezone.utc).timestamp() - 2
+            task.history.remove(entry)
+            task.history.append(
+                AuditEntry(
+                    from_stage=entry.from_stage,
+                    to_stage=entry.to_stage,
+                    timestamp=datetime.fromtimestamp(
+                        old_time, tz=timezone.utc
+                    ).isoformat(),
+                    note=entry.note,
+                )
+            )
+            break
+
+    # Start monitor with fast threshold and 1 second poll interval
+    monitor = asyncio.create_task(
+        stale_task_monitor(board, threshold_seconds=1, poll_interval_seconds=1)
+    )
+    await asyncio.sleep(2)  # Wait for at least one poll cycle
+    monitor.cancel()
+
+    try:
+        await monitor
+    except asyncio.CancelledError:
+        pass
+
+    assert len(hook_calls) >= 1
+    assert task.id in hook_calls
