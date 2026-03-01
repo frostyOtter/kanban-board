@@ -1,14 +1,17 @@
 """Tests for kanban.board.AsyncKanbanBoard - modern implementation."""
 
 import asyncio
-from pathlib import Path
+import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
 
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from kanban.board import AsyncKanbanBoard, stale_task_monitor
-from kanban.domain import AuditEntry, Stage as KanbanStage
+from kanban.domain import AuditEntry
+from kanban.domain import Stage as KanbanStage
 
 
 @pytest.fixture
@@ -110,7 +113,7 @@ async def test_find_stale_ignores_non_in_progress(board):
 @pytest.mark.asyncio
 async def test_find_stale_uses_audit_timestamp_not_created_at(board):
     """Test find_stale uses audit trail timestamp, not task.created_at."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     task = await board.create_task("Old Task", "Created long ago")
 

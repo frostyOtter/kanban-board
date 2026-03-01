@@ -38,8 +38,6 @@ from .domain import (
 )
 from .hooks import AsyncHookFn, HookRegistry
 
-import asyncio
-
 
 class AsyncKanbanBoard:
     """

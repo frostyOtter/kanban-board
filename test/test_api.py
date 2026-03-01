@@ -1,14 +1,16 @@
-from pathlib import Path
+import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from kanban.api import app, CreateTaskRequest, TaskResponse, BoardSnapshot
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from kanban.api import BoardSnapshot, CreateTaskRequest, TaskResponse, app
+from kanban.assistants import async_mock_reviewer
 from kanban.board import AsyncKanbanBoard
 from kanban.domain import Stage, TaskNotFoundError, WIPLimitError
-from kanban.assistants import async_mock_reviewer
 
 
 @pytest.fixture
@@ -25,8 +27,6 @@ def temp_persist_path():
 def client(temp_persist_path):
     """Create a test client with fresh board state."""
     from kanban.api import _board
-
-    _board = None
 
     # Delete empty file first
     if temp_persist_path.exists():
@@ -48,8 +48,6 @@ def client(temp_persist_path):
 def client_wip_1(temp_persist_path):
     """Create a test client with WIP limit of 1."""
     from kanban.api import _board
-
-    _board = None
 
     # Delete empty file first
     if temp_persist_path.exists():
@@ -105,22 +103,16 @@ def test_create_task_with_dependencies(client):
     assert data["depends_on"] == [dep_id]
 
 
-def test_create_task_invalid_dependency():
+def test_create_task_invalid_dependency(temp_persist_path):
     """Test POST /tasks with non-existent dependency returns 404."""
-    # Create a fresh board that definitely doesn't have the dependency
-    import tempfile
-    from pathlib import Path
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as f:
-        temp_path = Path(f.name)
-
-    # Delete the empty file so board starts fresh
-    temp_path.unlink()
+    # Delete empty file first
+    if temp_persist_path.exists():
+        temp_persist_path.unlink()
 
     from kanban.api import get_board
 
     app.dependency_overrides[get_board] = lambda: AsyncKanbanBoard(
-        persist_path=temp_path
+        persist_path=temp_persist_path
     )
 
     with TestClient(app) as test_client:
@@ -412,7 +404,7 @@ def test_board_snapshot_schema():
 def test_exception_to_http_translation():
     """Test that domain exceptions map to correct HTTP status codes."""
     from kanban.api import _http
-    from kanban.domain import UnresolvedDependencyError, InvalidTransitionError
+    from kanban.domain import InvalidTransitionError, UnresolvedDependencyError
 
     # TaskNotFoundError -> 404
     exc = TaskNotFoundError("task123")

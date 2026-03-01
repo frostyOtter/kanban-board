@@ -1,14 +1,17 @@
 """Tests for the hooks system."""
 
 import asyncio
-from pathlib import Path
+import sys
 import tempfile
+from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from kanban.board import AsyncKanbanBoard
 from kanban.domain import Stage
-from kanban.hooks import HookRegistry, AsyncHookFn, log_transition
+from kanban.hooks import AsyncHookFn, HookRegistry, log_transition
 
 
 @pytest.fixture
@@ -21,7 +24,7 @@ def temp_persist_path():
         path.unlink()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def board(temp_persist_path):
     """Create a fresh board for each test."""
     if temp_persist_path.exists():
@@ -306,8 +309,8 @@ async def test_on_stale_task_hook_registered():
 @pytest.mark.asyncio
 async def test_on_stale_task_hook_fires():
     """Test that on_stale_task hook fires correctly."""
-    import asyncio
     from datetime import datetime, timezone
+
     from kanban.board import AsyncKanbanBoard, stale_task_monitor
     from kanban.domain import AuditEntry, Stage
 

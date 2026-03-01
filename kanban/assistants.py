@@ -11,10 +11,9 @@ without touching any board logic.
 from __future__ import annotations
 
 import asyncio
-from typing import Callable, Coroutine, Any
+from typing import Any, Callable, Coroutine
 
 from loguru import logger
-
 
 # Type alias used by the board
 AsyncCodingAssistant = Callable[[str], Coroutine[Any, Any, str]]

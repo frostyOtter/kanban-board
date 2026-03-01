@@ -13,12 +13,11 @@ Available hook events:
 
 from __future__ import annotations
 
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 from loguru import logger
 
 from .domain import Task
-
 
 AsyncHookFn = Callable[[Task], Awaitable[None]]
 
