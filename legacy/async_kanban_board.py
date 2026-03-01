@@ -25,10 +25,9 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Coroutine, Any
+from typing import Any, Callable, Coroutine
 
 from loguru import logger
-
 
 # ---------------------------------------------------------------------------
 # Domain

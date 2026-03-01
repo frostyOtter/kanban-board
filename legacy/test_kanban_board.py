@@ -1,10 +1,9 @@
 import asyncio
-from pathlib import Path
 import tempfile
-from unittest.mock import MagicMock, AsyncMock
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from kanban_board import KanbanBoard, Stage, mock_assistant
 
 
