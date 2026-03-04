@@ -19,6 +19,7 @@ Each sprint is self-contained — ship it, test it, then move on. Start with Spr
 | 2 | LLM Chaining | `call_llm` tool | `reviewer_assistant` + `review_notes` | 🔵 To Do |
 | 3 | State Machine Depth | Session re-open | `reject()` + `retry_count` | 🔵 To Do |
 | 4 | Background Scheduler | Cron scheduling | `stale_task_monitor` in lifespan | 🔵 To Do |
+| 4.5 | Stale Response Handling | `processingGeneration` counter | `generation_id` field + validation | 🔵 To Do |
 | 5 | Config-Driven Behaviour | Skills system | YAML skills + `SkillLoader` | 🔵 To Do |
 | 6 | Docs as Output | Session sharing | `/export` endpoint + `TaskExporter` | 🔵 To Do |
 
@@ -30,7 +31,8 @@ Each sprint is self-contained — ship it, test it, then move on. Start with Spr
 Sprint 1: Hooks System
     ├─> Sprint 2: Reviewer Assistant (uses hooks)
     ├─> Sprint 3: Reject Transition (uses hooks)
-    └─> Sprint 4: Stale Monitor (uses hooks)
+    ├─> Sprint 4: Stale Monitor (uses hooks)
+    └─> Sprint 4.5: Generation Counter (uses hooks for observability)
 
 Sprint 5: Skills System (uses hooks)
     └─> Sprint 2: Reviewer Assistant (optional: skill-based reviewer)
@@ -49,8 +51,9 @@ Sprint 6: Export (depends on Sprints 2, 3, 5 features)
 2. **Sprint 2** — Adds LLM chaining, builds on hooks.
 3. **Sprint 3** — Adds non-happy path flow, builds on hooks.
 4. **Sprint 4** — Adds background automation, builds on hooks.
-5. **Sprint 5** — Adds config-driven behaviour, builds on hooks.
-6. **Sprint 6** — Adds documentation output, integrates all previous features.
+5. **Sprint 4.5** — Fixes race condition, applies Craft Agents' generation counter pattern.
+6. **Sprint 5** — Adds config-driven behaviour, builds on hooks.
+7. **Sprint 6** — Adds documentation output, integrates all previous features.
 
 ---
 
@@ -62,6 +65,7 @@ Sprint 6: Export (depends on Sprints 2, 3, 5 features)
 | 2 | LLM Chaining | Multi-stage agent workflows, latency/cost tradeoffs |
 | 3 | State Machine Depth | Handle non-linear flows, audit trails for debugging |
 | 4 | Background Async | Long-running agent monitoring, graceful shutdown |
+| 4.5 | Optimistic Concurrency | Generation counter pattern, graceful stale response handling |
 | 5 | Config-Driven | Swappable behaviour without code changes |
 | 6 | Documentation as Output | Agent work as shareable artifacts |
 
@@ -91,6 +95,7 @@ Sprint 6: Export (depends on Sprints 2, 3, 5 features)
 - [Sprint 2: Reviewer Assistant](./sprint-02-reviewer.md)
 - [Sprint 3: Reject Transition](./sprint-03-reject.md)
 - [Sprint 4: Stale Task Monitor](./sprint-04-stale-monitor.md)
+- [Sprint 4.5: Generation Counter Pattern](./sprint-04-5-generation-counter.md)
 - [Sprint 5: Skills System](./sprint-05-skills.md)
 - [Sprint 6: Session Export](./sprint-06-export.md)
 
